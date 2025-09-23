@@ -748,6 +748,41 @@ export const annotationMixin = {
           canvas.add(psstroke)
           this.$options.silentAnnnotation = false
         }
+      } else if (obj.type === 'rectangle') {
+        const rect = new fabric.Rect({
+          ...base,
+          left: obj.left * scaleMultiplierX,
+          top: obj.top * scaleMultiplierY,
+          width: obj.width * scaleMultiplierX,
+          height: obj.height * scaleMultiplierY,
+          fill: obj.fill,
+          stroke: obj.stroke,
+          strokeWidth: obj.strokeWidth
+        })
+        rect.set('id', obj.id)
+        rect.set('canvasWidth', canvasWidth)
+        rect.set('canvasHeight', canvasHeight)
+        this.addSerialization(rect)
+        this.$options.silentAnnnotation = true
+        canvas.add(rect)
+        this.$options.silentAnnnotation = false
+      } else if (obj.type === 'circle') {
+        const circle = new fabric.Circle({
+          ...base,
+          left: obj.left * scaleMultiplierX,
+          top: obj.top * scaleMultiplierY,
+          radius: obj.radius * scaleMultiplierX,
+          fill: obj.fill,
+          stroke: obj.stroke,
+          strokeWidth: obj.strokeWidth
+        })
+        circle.set('id', obj.id)
+        circle.set('canvasWidth', canvasWidth)
+        circle.set('canvasHeight', canvasHeight)
+        this.addSerialization(circle)
+        this.$options.silentAnnnotation = true
+        canvas.add(circle)
+        this.$options.silentAnnnotation = false
       } else if (obj.type === 'arrow') {
         // Handle custom Arrow object
         const points = [
@@ -859,7 +894,6 @@ export const annotationMixin = {
     },
 
     onChangeShape(newValue) {
-      console.log('onChangeShape', newValue)
       this.shape = newValue
       this.isShowingPalette = false
       localPreferences.setPreference('player:shape', this.shape)
@@ -945,6 +979,11 @@ export const annotationMixin = {
     },
 
     startDrawingShape(event) {
+      if (!this.isDrawingShape) {
+        throw new Error(
+          'startDrawingShape can only be called when isDrawingShape is true.'
+        )
+      }
       const canvas = this.canvas || this.canvasWrapper
       const offsetCanvas = canvas.getBoundingClientRect()
       const posX = this.getClientX(event) - offsetCanvas.x
@@ -993,8 +1032,7 @@ export const annotationMixin = {
                 : 2
         })
       } else {
-        console.error('Unknown shape type:', this.shape)
-        return
+        throw new Error('Unknown shape type:', this.shape)
       }
       this.fabricCanvas.add(this.drawingShape)
     },
@@ -1100,8 +1138,7 @@ export const annotationMixin = {
         const end = [posX, posY]
         this.updateArrowShape({ start, end })
       } else {
-        console.error('Unknown shape type:', this.shape)
-        return
+        throw new Error('Unknown shape type:', this.shape)
       }
       // Update the shape's coordinates and render the canvas
       this.drawingShape.setCoords()
@@ -1121,6 +1158,7 @@ export const annotationMixin = {
     },
 
     disableCurrentTool() {
+      console.log('disableCurrentTool')
       const canvas = this.canvas || this.canvasWrapper
       const clickarea = canvas.getElementsByClassName('upper-canvas')[0]
       if (this.isDrawing) {
@@ -1128,10 +1166,13 @@ export const annotationMixin = {
         this.isDrawing = false
       } else if (this.isTyping) {
         this.isTyping = false
-        clickarea.removeEventListener('dblclick', this.addText)
+        if (clickarea) {
+          clickarea.removeEventListener('dblclick', this.addText)
+        }
       } else if (this.isDrawingShape) {
         this.isDrawingShape = false
         this.fabricCanvas.isDrawingMode = false
+        console.log('disable shape')
         this.canvasWrapper.removeEventListener(
           'mousedown',
           this.startDrawingShape
@@ -1152,10 +1193,9 @@ export const annotationMixin = {
     onEraseClicked() {
       this.showCanvas()
       if (this.isDrawing) {
-        this.fabricCanvas.isDrawingMode = false
-        this.isDrawing = false
+        this.disableCurrentTool()
       } else {
-        this.isTyping = false
+        this.disableCurrentTool()
         if (this.fabricCanvas) {
           this.fabricCanvas.isDrawingMode = true
         }
@@ -1175,11 +1215,10 @@ export const annotationMixin = {
       const clickarea = this.canvas.getElementsByClassName('upper-canvas')[0]
       this.showCanvas()
       if (this.isTyping) {
-        this.isTyping = false
-        clickarea.removeEventListener('dblclick', this.addText)
+        this.disableCurrentTool()
       } else {
+        this.disableCurrentTool()
         this.fabricCanvas.isDrawingMode = false
-        this.isDrawing = false
         this.isTyping = true
         clickarea.addEventListener('dblclick', this.addText)
       }
@@ -1241,10 +1280,8 @@ export const annotationMixin = {
         group._objects.forEach(groupObj => {
           const canvasObj = this.getObjectById(groupObj.id)
           if (canvasObj === undefined) {
-            console.log(groupObj)
             throw new Error('Cannot find object in canvas' + groupObj.id)
           }
-          console.log(groupObj.id, canvasObj)
           this.setObjectData(canvasObj)
           const targetObj = canvasObj.serialize()
           const point = new fabric.Point(groupObj.left, groupObj.top)

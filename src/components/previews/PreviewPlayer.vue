@@ -599,7 +599,6 @@
 
 <script>
 import { fabric } from 'fabric'
-import { PSBrush } from '@arch-inc/fabricjs-psbrush'
 
 import {
   ArrowUpRightIcon,
@@ -607,7 +606,7 @@ import {
   GlobeIcon,
   LinkIcon
 } from 'lucide-vue-next'
-import { defineAsyncComponent, markRaw } from 'vue'
+import { defineAsyncComponent } from 'vue'
 import { mapGetters, mapActions } from 'vuex'
 
 import {
@@ -619,7 +618,7 @@ import {
 import { getEntityPath } from '@/lib/path'
 import localPreferences from '@/lib/preferences'
 
-import { annotationMixin } from '@/components/mixins/annotation'
+import Annotations from '@/lib/annotations'
 import { fullScreenMixin } from '@/components/mixins/fullscreen'
 import { domMixin } from '@/components/mixins/dom'
 
@@ -640,7 +639,7 @@ let lastIndex = 1
 export default {
   name: 'preview-player',
 
-  mixins: [annotationMixin, domMixin, fullScreenMixin],
+  mixins: [domMixin, fullScreenMixin],
 
   components: {
     ArrowUpRightIcon,
@@ -714,6 +713,7 @@ export default {
   },
 
   emits: [
+    'annotation-changed',
     'add-extra-preview',
     'add-preview',
     'change-current-preview',
@@ -726,6 +726,7 @@ export default {
   data() {
     return {
       annotations: [],
+      annotationManager: null,
       availableAnimations: [],
       comparisonPreviewIndex: 0,
       current3DAnimation: null,
@@ -808,7 +809,7 @@ export default {
 
   mounted() {
     this.configureEvents()
-    this.setupFabricCanvas()
+    this.setupAnnotationManager()
     this.reloadAnnotations()
     if (this.isPicture) this.loadAnnotation()
     this.resetPreviewFileMap()
@@ -824,11 +825,13 @@ export default {
         this.productionBackgrounds.find(this.isDefaultBackground) || null
       this.onObjectBackgroundSelected()
     }
-    this.resetPencilConfiguration()
+    this.initAnnotationPreferences()
   },
 
   beforeUnmount() {
-    this.endAnnotationSaving()
+    if (this.annotationManager) {
+      this.annotationManager.destroy()
+    }
     this.removeEvents()
   },
 
@@ -1387,36 +1390,32 @@ export default {
       return dimensions
     },
 
-    setupFabricCanvas() {
-      const dimensions = this.getDimensions()
-      const width = dimensions.width
-      const height = dimensions.height
-      console.log('setupFabricCanvas', width, height)
+    setupAnnotationManager() {
+      const canvasElement = this.$refs['annotation-canvas']
+      const canvasComparisonElement = this.$refs['annotation-canvas-comparison']
 
-      // Use markRaw() to avoid reactivity on Fabric Canvas
-      this.fabricCanvas = markRaw(
-        new fabric.Canvas(this.canvasId, {
-          fireRightClick: true,
-          width,
-          height,
-          enablePointerEvents: true
-        })
-      )
-      const brush = new PSBrush(this.fabricCanvas)
-      brush.width = 20 // Set default brush width
-      brush.color = '#000' // Set default color
-      brush.disableTouch = true // Disable touch input
-      brush.disableMouse = true
-      brush.pressureManager.fallback = 0.5 // Fallback value for mouse/touch
-      this.fabricCanvas.freeDrawingBrush = brush
-      this.fabricCanvasComparison = new fabric.StaticCanvas(
+      this.annotationManager = new Annotations({
+        canvasElement,
+        canvasComparisonElement,
+        isCurrentUserArtist: this.isCurrentUserArtist,
+        getCurrentTime: () => this.getCurrentTime(),
+        getCurrentFrame: () => this.getCurrentFrame(),
+        onAnnotationChanged: data => {
+          this.$emit('annotation-changed', data)
+        }
+      })
+
+      this.annotationManager.setupCanvas(
+        this.canvasId,
         this.canvasId + '-comparison'
       )
-      this.configureCanvas()
+
+      const dimensions = this.getDimensions()
+      this.annotationManager.setDimensions(dimensions.width, dimensions.height)
     },
 
     fixCanvasSize(dimensions) {
-      if (!this.fabricCanvas) return
+      if (!this.annotationManager) return
       if (this.isPicture && dimensions.source === 'movie') return
       if (this.isMovie && dimensions.source === 'picture') return
       const { height, left, top, width } = dimensions
@@ -1424,12 +1423,8 @@ export default {
       this.canvasWrapper.style.left = left + 'px'
       this.canvasWrapper.style.width = width + 'px'
       this.canvasWrapper.style.height = height + 'px'
-      if (
-        this.fabricCanvas.width !== width ||
-        this.fabricCanvas.height !== height
-      ) {
-        this.fabricCanvas.setDimensions({ width, height })
-      }
+
+      this.annotationManager.setDimensions(width, height)
       this.refreshCanvas()
     },
 
@@ -1638,55 +1633,134 @@ export default {
       window.dispatchEvent(new Event('resize'))
     },
 
-    onDeleteClicked() {
-      this.clearFocus()
-      this.deleteSelection()
-    },
-
     onPencilAnnotateClicked() {
       this.clearFocus()
       if (this.isDrawing) {
         this.isDrawing = false
+        this.annotationManager.disableCurrentTool()
       } else {
-        this._resetColor()
-        this._resetPencil()
         this.isTyping = false
+        this.isDrawingShape = false
         this.isDrawing = true
+        this.annotationManager.enableTool('draw')
       }
     },
 
     onShapeAnnotateClicked() {
       this.clearFocus()
-      this.onDrawShapeClicked()
-      // if (this.isDrawingShape) {
-      //   this.isDrawingShape = false
-      // } else {
-      //   this._resetColor()
-      //   this._resetPencil()
-      //   this.isTyping = false
-      //   this.isDrawing = false
-      //   this.isDrawingShape = true
-      // }
+      if (this.isDrawingShape) {
+        this.isDrawingShape = false
+        this.annotationManager.disableCurrentTool()
+      } else {
+        this.isTyping = false
+        this.isDrawing = false
+        this.isDrawingShape = true
+        this.annotationManager.enableTool('shape')
+      }
     },
 
     onTypeClicked() {
       this.clearFocus()
       if (this.isTyping) {
         this.isTyping = false
+        this.annotationManager.disableCurrentTool()
       } else {
         this.isDrawing = false
+        this.isDrawingShape = false
         this.isTyping = true
+        this.annotationManager.enableTool('text')
+      }
+    },
+
+    initAnnotationPreferences() {
+      if (!this.annotationManager) return
+
+      const drawTool = this.annotationManager.getTool('draw')
+      const textTool = this.annotationManager.getTool('text')
+      const shapeTool = this.annotationManager.getTool('shape')
+
+      if (drawTool) {
+        const pencilColor =
+          localPreferences.getPreference('player:pencil-color') || '#ff3860'
+        const pencilWidth =
+          localPreferences.getPreference('player:pencil-width') || 'big'
+        drawTool.setColor(pencilColor)
+        drawTool.setWidth(pencilWidth)
+      }
+
+      if (textTool) {
+        const textColor =
+          localPreferences.getPreference('player:text-color') || '#ff3860'
+        textTool.setColor(textColor)
+      }
+
+      if (shapeTool) {
+        const shapeColor =
+          localPreferences.getPreference('player:shape-color') || '#ff3860'
+        const shape =
+          localPreferences.getPreference('player:shape') || 'rectangle'
+        shapeTool.setColor(shapeColor)
+        shapeTool.setShape(shape)
       }
     },
 
     refreshCanvas() {
-      this.clearCanvas()
+      if (!this.annotationManager) return
+      this.annotationManager.clearCanvas()
       if (this.annotations.length > 0) {
         if (this.isMovie) {
           this.loadAnnotation()
         } else if (this.isPicture) {
           this.loadAnnotation()
         }
+      }
+    },
+
+    onChangePencilColor(color) {
+      const drawTool = this.annotationManager?.getTool('draw')
+      if (drawTool) {
+        drawTool.setColor(color)
+      }
+    },
+
+    onChangePencilWidth(width) {
+      const drawTool = this.annotationManager?.getTool('draw')
+      if (drawTool) {
+        drawTool.setWidth(width)
+      }
+    },
+
+    onChangeTextColor(color) {
+      const textTool = this.annotationManager?.getTool('text')
+      if (textTool) {
+        textTool.setColor(color)
+      }
+    },
+
+    onChangeShapeColor(color) {
+      const shapeTool = this.annotationManager?.getTool('shape')
+      if (shapeTool) {
+        shapeTool.setColor(color)
+      }
+    },
+
+    onChangeShape(shape) {
+      const shapeTool = this.annotationManager?.getTool('shape')
+      if (shapeTool) {
+        shapeTool.setShape(shape)
+      }
+    },
+
+    onDeleteClicked() {
+      this.clearFocus()
+      if (this.annotationManager) {
+        this.annotationManager.deleteSelection()
+      }
+    },
+
+    clearCanvas() {
+      if (this.annotationManager) {
+        this.annotationManager.clearCanvas()
       }
     },
 
@@ -1784,7 +1858,7 @@ export default {
           return
         }
       }
-      if (!this.fabricCanvas) this.setupFabricCanvas()
+      if (!this.fabricCanvas) this.annotationManager.setupFabricCanvas()
       if (this.isMovie && this.previewViewer && this.isPlaying) {
         this.previewViewer.pause()
       }
@@ -1954,7 +2028,7 @@ export default {
 
       if (!['INPUT', 'TEXTAREA'].includes(event.target.tagName)) {
         if (event.keyCode === 46 || event.keyCode === 8) {
-          this.deleteSelection()
+          this.annotationManager.deleteSelection()
         } else if (event.keyCode === 37) {
           // arrow left
           this.goPreviousFrame()

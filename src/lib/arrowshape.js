@@ -19,21 +19,10 @@ export class Arrow extends fabric.Line {
 
     // Setup custom controls
     this._setupControls()
-
-    // Store the initial center position for relative calculations
-    // this._lastLeft = this.left
-    // this._lastTop = this.top
-
-    // this.on("mousedown:before", this._onMouseDown.bind(this))
     this.on('moving', e => {
-      console.log(e)
       if (e.transform.action !== 'drag') {
         return
       }
-      console.log('Dragging from to', this.left, e.transform.ex)
-      const diffX = e.transform.ex - this.left
-      const diffY = e.transform.ey - this.top
-      console.log('  Diff', diffX, diffY)
       this.set({
         x1: this.x1 + e.e.movementX,
         y1: this.y1 + e.e.movementY,
@@ -41,10 +30,6 @@ export class Arrow extends fabric.Line {
         y2: this.y2 + e.e.movementY
       })
     })
-  }
-
-  _onMouseDown(event) {
-    console.log('Mouse down on arrow:', this, event)
   }
 
   /**
@@ -120,8 +105,6 @@ export class Arrow extends fabric.Line {
    * Render start point control
    */
   _renderStartControl(ctx, left, top, styleOverride, fabricObject) {
-    // console.log("start render", left, top)
-    // console.log(ctx)
     const size = 8
     ctx.save()
     ctx.fillStyle = '#4CAF50' // Green for start
@@ -155,11 +138,6 @@ export class Arrow extends fabric.Line {
    */
   _startPointHandler(eventData, transformData, x, y) {
     const pointer = this.canvas.getPointer(eventData.e)
-    // console.log("start point handler", pointer)
-    // Update x1, y1 to the pointer position
-    // console.log("x1, y1", this.x1, this.y1)
-    // console.log("left, top", this.left, this.top)
-    // console.log("width, height", this.width, this.height)
     this.set({
       x1: pointer.x,
       y1: pointer.y
